@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=JetAutoClicker
+GenericName=Autoclicker
+Comment=Autoclicker for Linux (Wayland and X11), up to 1000 CPS
+Exec=jetautoclicker
+Icon=jetautoclicker
+Terminal=false
+Categories=Utility;
+Keywords=autoclicker;clicker;mouse;click;cps;
+StartupWMClass=jetautoclicker

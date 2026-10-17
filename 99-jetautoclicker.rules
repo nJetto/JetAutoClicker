@@ -1,0 +1,2 @@
+# Allow members of the "input" group to create virtual input devices.
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
