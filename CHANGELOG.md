@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - The global hotkey did not fire while a modifier key was held down. For example, with the
-  hotkey set to `R`, pressing it while holding `Ctrl` (sprinting in Minecraft) did nothing.
+  hotkey set to `R`, pressing it while holding `Ctrl` (i tested this in minecraft) did nothing.
 
 ### Changed
 - The hotkey is now always a **single key** (or a mouse side button). Modifier keys
