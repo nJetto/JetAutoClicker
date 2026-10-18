@@ -31,8 +31,7 @@ static struct {
     atomic_llong    period_ns;
     atomic_int      button, hk_key, ndevs, backend;
     EngineInjectFn  ext;
-    atomic_uint     hk_mods;
-    atomic_ullong   clicks;
+        atomic_ullong   clicks;
     int             uifd;
     char            err[160];
     EngineChangeFn  on_change;
@@ -232,26 +231,16 @@ static void rescan(Dev *devs, int *n)
     closedir(dir);
 }
 
-static unsigned held_bits;   /* only touched by the hotkey thread */
-
-static int mod_index(int code)
+static bool is_modifier(int code)
 {
     switch (code) {
-    case KEY_LEFTCTRL:  return 0;  case KEY_RIGHTCTRL:  return 1;
-    case KEY_LEFTALT:   return 2;  case KEY_RIGHTALT:   return 3;
-    case KEY_LEFTSHIFT: return 4;  case KEY_RIGHTSHIFT: return 5;
-    case KEY_LEFTMETA:  return 6;  case KEY_RIGHTMETA:  return 7;
+    case KEY_LEFTCTRL:  case KEY_RIGHTCTRL:
+    case KEY_LEFTALT:   case KEY_RIGHTALT:
+    case KEY_LEFTSHIFT: case KEY_RIGHTSHIFT:
+    case KEY_LEFTMETA:  case KEY_RIGHTMETA:
+        return true;
     }
-    return -1;
-}
-
-static unsigned current_mods(void)
-{
-    unsigned m = 0;
-    for (int g = 0; g < 4; g++)
-        if ((held_bits >> (2 * g)) & 3u)
-            m |= 1u << g;
-    return m;
+    return false;
 }
 
 static void notify_change(void)
@@ -266,11 +255,10 @@ static void handle_key(int code, int value)
         return;
     bool down = (value == 1);
 
-    int mi = mod_index(code);
-    if (mi >= 0) {                        /* modifiers alone are never a hotkey */
-        if (down) held_bits |= 1u << mi; else held_bits &= ~(1u << mi);
+    /* Modifiers are never a hotkey and never part of one: the hotkey is a
+     * single key and works regardless of which modifiers are held. */
+    if (is_modifier(code))
         return;
-    }
     if (code == BTN_LEFT || code == BTN_RIGHT || code == BTN_MIDDLE)
         return;
 
@@ -278,25 +266,20 @@ static void handle_key(int code, int value)
         if (!down)
             return;
         atomic_store(&S.capturing, false);
-        unsigned m = current_mods();
-        bool cancel = (code == KEY_ESC && m == 0);
-        if (!cancel) {
+        bool cancel = (code == KEY_ESC);
+        if (!cancel)
             atomic_store(&S.hk_key, code);
-            atomic_store(&S.hk_mods, m);
-        }
         if (S.on_capture)
-            S.on_capture(code, m, cancel, S.user);
+            S.on_capture(code, cancel, S.user);
         return;
     }
 
     if (code != atomic_load(&S.hk_key))
         return;
-    bool mods_ok = (current_mods() == atomic_load(&S.hk_mods));
 
     if (atomic_load(&S.hold_mode)) {
-        if (down && mods_ok)  engine_set_running(true);
-        else if (!down)       engine_set_running(false);
-    } else if (down && mods_ok) {
+        engine_set_running(down);
+    } else if (down) {
         engine_set_running(!atomic_load(&S.running));
     }
 }
@@ -347,7 +330,7 @@ static void *hotkey_thread(void *arg)
             if (dead[i]) { close(devs[i].fd); continue; }
             devs[w++] = devs[i];
         }
-        if (w != n) { n = w; held_bits = 0; atomic_store(&S.ndevs, n); notify_change(); }
+        if (w != n) { n = w; atomic_store(&S.ndevs, n); notify_change(); }
     }
     return NULL;
 }
@@ -364,7 +347,6 @@ bool engine_init(EngineChangeFn on_change, EngineCaptureFn on_capture, void *use
     atomic_store(&S.period_ns, 100000000LL);   /* 10 CPS */
     atomic_store(&S.button, BTN_LEFT);
     atomic_store(&S.hk_key, KEY_F6);
-    atomic_store(&S.hk_mods, 0u);
 
     bool ok = uinput_create();
     pthread_create(&S.clicker, NULL, clicker_thread, NULL);
@@ -404,8 +386,8 @@ void engine_set_cps(double cps)
 
 void engine_set_button(int btn)       { atomic_store(&S.button, btn); }
 void engine_set_hold_mode(bool hold)  { atomic_store(&S.hold_mode, hold); }
-void engine_set_hotkey(int key, unsigned mods) { atomic_store(&S.hk_key, key); atomic_store(&S.hk_mods, mods); }
-void engine_get_hotkey(int *key, unsigned *mods) { *key = atomic_load(&S.hk_key); *mods = atomic_load(&S.hk_mods); }
+void engine_set_hotkey(int key)       { atomic_store(&S.hk_key, key); }
+void engine_get_hotkey(int *key)      { *key = atomic_load(&S.hk_key); }
 void engine_start_capture(void)       { atomic_store(&S.capturing, true); }
 void engine_cancel_capture(void)      { atomic_store(&S.capturing, false); }
 bool engine_is_capturing(void)        { return atomic_load(&S.capturing); }
@@ -445,7 +427,7 @@ void engine_set_running(bool on)
         notify_change();
 }
 
-void engine_hotkey_name(int c, unsigned mods, char *out, size_t n)
+void engine_hotkey_name(int c, char *out, size_t n)
 {
     static const char *r1 = "QWERTYUIOP", *r2 = "ASDFGHJKL", *r3 = "ZXCVBNM";
     char key[32];
@@ -486,10 +468,5 @@ void engine_hotkey_name(int c, unsigned mods, char *out, size_t n)
         else   snprintf(key, sizeof key, "Key %d", c);
     }
 
-    snprintf(out, n, "%s%s%s%s%s",
-             (mods & MOD_CTRL)  ? "Ctrl+"  : "",
-             (mods & MOD_ALT)   ? "Alt+"   : "",
-             (mods & MOD_SHIFT) ? "Shift+" : "",
-             (mods & MOD_META)  ? "Meta+"  : "",
-             key);
+    snprintf(out, n, "%s", key);
 }

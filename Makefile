@@ -19,7 +19,7 @@ install: jetautoclicker
 	install -Dm644 jetautoclicker.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/jetautoclicker.svg
 
 # Build a .deb (installs into /usr, adds a JetAutoClicker entry to the KDE/GNOME app menu)
-VERSION ?= 1.0.0
+VERSION ?= 1.0.1
 ARCH    := $(shell dpkg --print-architecture 2>/dev/null)
 DEBDIR  := build/jetautoclicker_$(VERSION)_$(ARCH)
 

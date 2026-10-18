@@ -71,11 +71,10 @@ static void load_config(void)
         cfg_backend = kf_int(kf, "backend", ENGINE_BACKEND_EXTERNAL);
         if (cfg_backend != ENGINE_BACKEND_UINPUT) cfg_backend = ENGINE_BACKEND_EXTERNAL;
         int key   = kf_int(kf, "hotkey", KEY_F6);
-        int mods  = kf_int(kf, "hotkey_mods", 0);
         if (cfg_btn < 0 || cfg_btn > 2) cfg_btn = 0;
         if (cfg_act < 0 || cfg_act > 1) cfg_act = 0;
         if (key > 0 && key < KEY_MAX)
-            engine_set_hotkey(key, (unsigned)mods & 15u);
+            engine_set_hotkey(key);        /* single key; any old modifiers in the config are dropped */
     }
     g_key_file_free(kf);
     g_free(path);
@@ -87,8 +86,8 @@ static void save_config(void)
     char *dir = g_path_get_dirname(path);
     g_mkdir_with_parents(dir, 0700);
 
-    int key; unsigned mods;
-    engine_get_hotkey(&key, &mods);
+    int key;
+    engine_get_hotkey(&key);
 
     GKeyFile *kf = g_key_file_new();
     g_key_file_set_integer(kf, "main", "rate_mode", cur_mode);
@@ -97,7 +96,6 @@ static void save_config(void)
     g_key_file_set_integer(kf, "main", "hold_mode", gtk_combo_box_get_active(GTK_COMBO_BOX(cb_act)));
     g_key_file_set_integer(kf, "main", "backend", gtk_combo_box_get_active(GTK_COMBO_BOX(cb_backend)));
     g_key_file_set_integer(kf, "main", "hotkey", key);
-    g_key_file_set_integer(kf, "main", "hotkey_mods", (int)mods);
 
     gsize len;
     char *data = g_key_file_to_data(kf, &len, NULL);
@@ -172,9 +170,9 @@ static void refresh_ui(void)
     if (engine_is_capturing()) {
         gtk_button_set_label(GTK_BUTTON(btn_hk), "Press a key...  (Esc = cancel)");
     } else {
-        char name[64]; int key; unsigned mods;
-        engine_get_hotkey(&key, &mods);
-        engine_hotkey_name(key, mods, name, sizeof name);
+        char name[64]; int key;
+        engine_get_hotkey(&key);
+        engine_hotkey_name(key, name, sizeof name);
         gtk_button_set_label(GTK_BUTTON(btn_hk), name);
     }
 
@@ -223,9 +221,9 @@ static void on_portal_state(void *user)
 
 /* engine callbacks (called from worker threads) */
 static void on_engine_change(void *user) { (void)user; g_idle_add(refresh_idle, NULL); }
-static void on_engine_capture(int key, unsigned mods, bool cancelled, void *user)
+static void on_engine_capture(int key, bool cancelled, void *user)
 {
-    (void)key; (void)mods; (void)cancelled; (void)user;
+    (void)key; (void)cancelled; (void)user;
     g_idle_add(capture_idle, NULL);
 }
 

@@ -6,11 +6,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define MOD_CTRL  1u
-#define MOD_ALT   2u
-#define MOD_SHIFT 4u
-#define MOD_META  8u
-
 /* Where clicks are sent: an external injector (xdg-desktop-portal), or the
  * kernel uinput virtual mouse (subject to libinput's 25 ms button debouncing,
  * so the button looks "held" above roughly 35 CPS on KWin/GNOME/etc). */
@@ -23,7 +18,7 @@
 /* Called (from an engine thread) when running state or device list changed. */
 typedef void (*EngineChangeFn)(void *user);
 /* Called (from an engine thread) when hotkey capture finished. */
-typedef void (*EngineCaptureFn)(int key, unsigned mods, bool cancelled, void *user);
+typedef void (*EngineCaptureFn)(int key, bool cancelled, void *user);
 
 /* Starts worker threads. Returns true if the virtual mouse could be created.
  * If false, engine_error() explains why (hotkey capture still works). */
@@ -41,10 +36,13 @@ bool   engine_uinput_ok(void);
 void   engine_set_cps(double cps);          /* clamped to [MIN_CPS, MAX_CPS] */
 void   engine_set_button(int btn_code);     /* BTN_LEFT / BTN_RIGHT / BTN_MIDDLE */
 void   engine_set_hold_mode(bool hold);     /* false = toggle, true = hold */
-void   engine_set_hotkey(int key, unsigned mods);
-void   engine_get_hotkey(int *key, unsigned *mods);
+/* The hotkey is always a single key. Modifier keys (Ctrl/Alt/Shift/Meta) are
+ * ignored: the hotkey fires no matter which modifiers are held at the moment,
+ * so e.g. sprinting with Ctrl held does not block it. */
+void   engine_set_hotkey(int key);
+void   engine_get_hotkey(int *key);
 
-void   engine_start_capture(void);          /* next key press becomes the hotkey */
+void   engine_start_capture(void);          /* next non-modifier key press becomes the hotkey */
 void   engine_cancel_capture(void);
 bool   engine_is_capturing(void);
 
@@ -53,6 +51,6 @@ bool   engine_is_running(void);
 unsigned long long engine_click_count(void);
 int    engine_hotkey_device_count(void);
 
-void   engine_hotkey_name(int key, unsigned mods, char *out, size_t n);
+void   engine_hotkey_name(int key, char *out, size_t n);
 
 #endif

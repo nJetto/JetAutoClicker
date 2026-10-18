@@ -28,8 +28,8 @@ int main(void)
     clock_gettime(CLOCK_MONOTONIC, &t1);
     puts("low-CPS stop OK");
     char buf[64];
-    engine_hotkey_name(64, 0, buf, sizeof buf); puts(buf);
-    engine_hotkey_name(33, 3, buf, sizeof buf); puts(buf);
+    engine_hotkey_name(64, buf, sizeof buf); puts(buf);
+    engine_hotkey_name(33, buf, sizeof buf); puts(buf);
     engine_shutdown();
     return 0;
 }

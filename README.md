@@ -8,7 +8,7 @@ Works on **Wayland (KWin / KDE Plasma)** and X11, kernel 6.12+ (anything with `u
 - Two click methods: Portal (any CPS on Wayland) and uinput (low CPS)
 - Choose the exact **clicks per second** (0.1 – **1000 CPS**), or set the **interval in ms** instead
 - Left / right / middle button
-- **Custom global hotkey**, including modifiers (e.g. `Ctrl+Alt+F6`) or a mouse side button
+- **Custom global hotkey**: any single key or a mouse side button. It works even while Ctrl/Alt/Shift/Meta are held (e.g. sprinting with Ctrl in a game)
 - Toggle mode (press to start/stop) or hold mode (click while the key is held)
 - Live "measured CPS" readout, settings saved to `~/.config/jetautoclicker/config.ini`
 
@@ -43,7 +43,7 @@ make
 
 ```
 make deb
-sudo apt install ./build/jetautoclicker_1.0.0_amd64.deb
+sudo apt install ./build/jetautoclicker_1.0.1_amd64.deb
 ```
 
 The package installs the binary to `/usr/bin`, a `.desktop` entry and an icon, so the app
@@ -75,7 +75,7 @@ app only looks at key events to match your hotkey, but you should be aware of wh
 ## Usage
 
 1. Pick **CPS** or **Interval** mode and enter the value.
-2. Click the hotkey button, then press the key (or combo) you want. `Esc` cancels.
+2. Click the hotkey button, then press the single key you want. Modifier keys are ignored, so the hotkey still works while they are held. `Esc` cancels.
 3. Put the cursor where you want to click and press the hotkey (or use **Start**).
 
 ## Notes on very high CPS
@@ -96,6 +96,7 @@ app only looks at key events to match your hotkey, but you should be aware of wh
 | `engine.c / engine.h` | click scheduler, uinput backend, evdev hotkey listener (no GTK dependency) |
 | `portal.c / portal.h` | xdg-desktop-portal RemoteDesktop backend (GIO) |
 | `test_engine.c` | timing smoke test (`make test`) |
+| `CHANGELOG.md` | release notes |
 | `99-jetautoclicker.rules` | udev rule for `/dev/uinput` |
 | `jetautoclicker.desktop`, `jetautoclicker.svg` | application menu entry and icon |
 | `debian-control.in`, `debian-postinst`, `debian-postrm` | metadata and scripts for `make deb` |
