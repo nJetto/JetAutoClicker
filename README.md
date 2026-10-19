@@ -87,6 +87,47 @@ app only looks at key events to match your hotkey, but you should be aware of wh
   Watch the "Measured" line; it counts what the app sent.
 - Each click presses the button for half the period (max 20 ms), so press and release are
   always separate events, even at 1000 CPS.
+  
+## Uninstall
+
+Use the case that matches how you installed it.
+
+**Installed from the `.deb` package:**
+
+```
+sudo apt remove jetautoclicker
+```
+
+**Installed with `sudo make install`:** there is no uninstall target, so remove the files by hand
+(if you used a different `PREFIX`, replace `/usr` with it):
+
+```
+sudo rm /usr/bin/jetautoclicker
+sudo rm /usr/share/applications/jetautoclicker.desktop
+sudo rm /usr/share/icons/hicolor/scalable/apps/jetautoclicker.svg
+```
+
+**Only built and run from the source folder:** nothing is installed, just delete the folder.
+
+### Remove settings
+
+```
+rm -rf ~/.config/jetautoclicker
+```
+
+This deletes the saved settings and the portal permission token.
+
+### Revert the permissions (only if you ran `make setup-permissions`)
+
+```
+sudo rm /etc/udev/rules.d/99-jetautoclicker.rules
+sudo rm /etc/modules-load.d/uinput.conf
+sudo udevadm control --reload
+sudo gpasswd -d "$USER" input
+```
+
+Only run the last command if no other program needs the `input` group. Log out and back in
+afterwards. The `uinput` module is unloaded on the next reboot (or run `sudo modprobe -r uinput`).
 
 ## Files
 
