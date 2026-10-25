@@ -3,5 +3,6 @@ set -e
 if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications || true
     command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+    command -v udevadm >/dev/null 2>&1 && udevadm control --reload || true
 fi
 exit 0

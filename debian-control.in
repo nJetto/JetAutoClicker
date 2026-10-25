@@ -3,8 +3,9 @@ Version: @VERSION@
 Section: utils
 Priority: optional
 Architecture: @ARCH@
-Depends: libgtk-3-0t64 | libgtk-3-0, libglib2.0-0t64 | libglib2.0-0
+Depends: libgtk-3-0t64 | libgtk-3-0, libglib2.0-0t64 | libglib2.0-0, libwayland-client0
 Maintainer: JetAutoClicker maintainers <noreply@example.com>
 Description: Autoclicker for Linux (Wayland and X11)
  GTK3 autoclicker with up to 1000 CPS, custom global hotkey and
- xdg-desktop-portal / uinput click backends. Works on KDE Plasma (Wayland).
+ Wayland virtual pointer (niri/sway), xdg-desktop-portal (KDE/GNOME) and
+ uinput click backends. Works on KDE Plasma, GNOME and niri.

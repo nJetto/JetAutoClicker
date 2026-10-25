@@ -1,0 +1,25 @@
+post_install() {
+    cat <<'EOF'
+JetAutoClicker was installed.
+
+For the global hotkey, add yourself to the "input" group (reading
+/dev/input/event* is needed to detect the hotkey on Wayland):
+
+    sudo usermod -aG input $USER
+
+Then log out and back in.  On niri/sway the "Wayland virtual pointer" click
+method needs no extra permissions.  The uinput fallback also needs write
+access to /dev/uinput, which the installed udev rule grants to the "input"
+group.
+
+niri users may want to keep the window floating:
+    window-rule {
+        match app-id="jetautoclicker"
+        open-floating true
+    }
+EOF
+}
+
+post_upgrade() {
+    post_install
+}

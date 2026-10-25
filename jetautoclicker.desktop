@@ -8,5 +8,5 @@ Exec=jetautoclicker
 Icon=jetautoclicker
 Terminal=false
 Categories=Utility;
-Keywords=autoclicker;clicker;mouse;click;cps;
+Keywords=autoclicker;clicker;mouse;click;cps;niri;sway;wayland;
 StartupWMClass=jetautoclicker

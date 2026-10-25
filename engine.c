@@ -27,10 +27,10 @@ static struct {
     pthread_cond_t  cond;
     pthread_t       clicker, hotkey;
     bool            clicker_started;
-    atomic_bool     running, quit, capturing, hold_mode, ext_ready;
+    atomic_bool     running, quit, capturing, hold_mode, ext_ready, wl_ready;
     atomic_llong    period_ns;
     atomic_int      button, hk_key, ndevs, backend;
-    EngineInjectFn  ext;
+    EngineInjectFn  ext, wl;
         atomic_ullong   clicks;
     int             uifd;
     char            err[160];
@@ -122,6 +122,11 @@ static void emit_button(int backend, int btn, int value)
     if (backend == ENGINE_BACKEND_EXTERNAL) {
         if (S.ext)
             S.ext(btn, value);
+        return;
+    }
+    if (backend == ENGINE_BACKEND_WAYLAND) {
+        if (S.wl)
+            S.wl(btn, value);
         return;
     }
     if (S.uifd < 0)
@@ -402,6 +407,13 @@ void engine_set_external_ready(bool r)
     if (!r && atomic_load(&S.backend) == ENGINE_BACKEND_EXTERNAL)
         engine_set_running(false);
 }
+void engine_set_wayland(EngineInjectFn fn) { S.wl = fn; }
+void engine_set_wayland_ready(bool r)
+{
+    atomic_store(&S.wl_ready, r);
+    if (!r && atomic_load(&S.backend) == ENGINE_BACKEND_WAYLAND)
+        engine_set_running(false);
+}
 void engine_set_backend(int b)
 {
     if (atomic_exchange(&S.backend, b) != b)
@@ -410,8 +422,12 @@ void engine_set_backend(int b)
 bool engine_uinput_ok(void) { return S.uifd >= 0; }
 bool engine_backend_ready(void)
 {
-    return atomic_load(&S.backend) == ENGINE_BACKEND_EXTERNAL ? atomic_load(&S.ext_ready)
-                                                              : S.uifd >= 0;
+    int be = atomic_load(&S.backend);
+    if (be == ENGINE_BACKEND_EXTERNAL)
+        return atomic_load(&S.ext_ready);
+    if (be == ENGINE_BACKEND_WAYLAND)
+        return atomic_load(&S.wl_ready);
+    return S.uifd >= 0;
 }
 
 void engine_set_running(bool on)

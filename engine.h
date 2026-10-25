@@ -6,11 +6,17 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/* Where clicks are sent: an external injector (xdg-desktop-portal), or the
- * kernel uinput virtual mouse (subject to libinput's 25 ms button debouncing,
- * so the button looks "held" above roughly 35 CPS on KWin/GNOME/etc). */
+/* Where clicks are sent:
+ *  - EXTERNAL: an external injector, currently xdg-desktop-portal RemoteDesktop
+ *    (KWin / GNOME).
+ *  - UINPUT: the kernel uinput virtual mouse (subject to libinput's 25 ms
+ *    button debouncing, so the button looks "held" above roughly 35 CPS).
+ *  - WAYLAND: the wlr-virtual-pointer protocol (niri / sway / wlroots).  Like
+ *    the portal it injects above libinput, so high CPS works and no extra
+ *    permissions are needed. */
 #define ENGINE_BACKEND_EXTERNAL 0
 #define ENGINE_BACKEND_UINPUT   1
+#define ENGINE_BACKEND_WAYLAND  2
 
 #define MIN_CPS 0.1
 #define MAX_CPS 1000.0
@@ -29,6 +35,8 @@ const char *engine_error(void);
 typedef void (*EngineInjectFn)(int btn_code, int state);   /* state: 1 press, 0 release */
 void   engine_set_external(EngineInjectFn fn);
 void   engine_set_external_ready(bool ready);
+void   engine_set_wayland(EngineInjectFn fn);
+void   engine_set_wayland_ready(bool ready);
 void   engine_set_backend(int backend);
 bool   engine_backend_ready(void);
 bool   engine_uinput_ok(void);

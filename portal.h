@@ -1,4 +1,5 @@
 /* Click injection through xdg-desktop-portal RemoteDesktop (KWin, GNOME, ...).
+ * niri/sway do not implement RemoteDesktop; use the wlr virtual pointer there.
  * Events enter the compositor above libinput, so libinput's 25 ms button
  * debouncing does not apply and high CPS works. Needs a running GLib main loop
  * (the GTK loop) for the asynchronous setup; portal_inject() is thread-safe. */

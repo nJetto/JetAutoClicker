@@ -5,5 +5,12 @@ if [ "$1" = "configure" ]; then
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications || true
     command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
     command -v kbuildsycoca6 >/dev/null 2>&1 && kbuildsycoca6 >/dev/null 2>&1 || true
+
+    # Make the uinput rule and module-load file effective without a reboot.
+    command -v modprobe >/dev/null 2>&1 && modprobe uinput >/dev/null 2>&1 || true
+    if command -v udevadm >/dev/null 2>&1; then
+        udevadm control --reload || true
+        udevadm trigger --subsystem-match=misc --sysname-match=uinput || true
+    fi
 fi
 exit 0

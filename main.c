@@ -1,28 +1,42 @@
 /*
  * JetAutoClicker - a GTK3 autoclicker for Linux (Wayland / X11)
  *
- * Clicks are injected through a kernel uinput virtual mouse, so it works on
- * Wayland compositors such as KWin where X11-style input injection is blocked.
- * The global hotkey is read straight from evdev (/dev/input/event*), because
- * Wayland does not allow normal applications to grab global keys.
+ * Clicks are injected through the wlr virtual pointer (niri/sway), the
+ * xdg-desktop-portal RemoteDesktop interface (KWin/GNOME), or a kernel uinput
+ * virtual mouse. The global hotkey is read straight from evdev
+ * (/dev/input/event*), because Wayland does not allow normal applications to
+ * grab global keys.
  */
 #include <gtk/gtk.h>
 #include <linux/input-event-codes.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "engine.h"
 #include "portal.h"
+#include "wayland.h"
 
 #define APP_NAME "JetAutoClicker"
 
+#ifndef APP_VERSION
+#define APP_VERSION "unknown"
+#endif
+
 enum { RATE_CPS = 0, RATE_INTERVAL = 1 };
+
+/* Values stored in the "Click method" combo box and in config.ini.  The first
+ * two values used to mean Portal and uinput; configs from older versions are
+ * migrated in load_config(). */
+enum { BE_AUTO = 0, BE_PORTAL = 1, BE_WAYLAND = 2, BE_UINPUT = 3 };
 
 static GtkWidget *win, *cb_mode, *spin, *lbl_info, *cb_btn, *cb_act, *cb_backend;
 static GtkWidget *btn_hk, *btn_run, *lbl_status, *lbl_actual, *lbl_hint;
 
 static gboolean ui_lock = FALSE;           /* suppress callbacks while we set widgets */
 static gboolean uinput_ok = FALSE;
+static gboolean wayland_ok = FALSE;
+static gboolean portal_started = FALSE;
 static int      cur_mode = RATE_CPS;
 static gint64   last_capture_us = 0;
 static gint64   last_tick_us = 0;
@@ -30,7 +44,7 @@ static unsigned long long last_clicks = 0;
 
 /* settings loaded from config (applied when the UI is built) */
 static double cfg_value = 10.0;
-static int    cfg_btn = 0, cfg_act = 0, cfg_backend = ENGINE_BACKEND_EXTERNAL;
+static int    cfg_btn = 0, cfg_act = 0, cfg_backend = BE_AUTO;
 
 static const int BUTTONS[] = { BTN_LEFT, BTN_RIGHT, BTN_MIDDLE };
 
@@ -68,8 +82,16 @@ static void load_config(void)
         cfg_value = kf_dbl(kf, "rate_value", 10.0);
         cfg_btn   = kf_int(kf, "button", 0);
         cfg_act   = kf_int(kf, "hold_mode", 0);
-        cfg_backend = kf_int(kf, "backend", ENGINE_BACKEND_EXTERNAL);
-        if (cfg_backend != ENGINE_BACKEND_UINPUT) cfg_backend = ENGINE_BACKEND_EXTERNAL;
+        if (g_key_file_has_key(kf, "main", "backend_mode", NULL)) {
+            cfg_backend = kf_int(kf, "backend_mode", BE_AUTO);
+        } else {
+            /* 1.0.x configs: 0 = Portal, 1 = uinput.  Portal was the old
+             * default, so map it to Auto: KDE/GNOME still pick the portal,
+             * while niri/sway now pick the working virtual pointer. */
+            cfg_backend = kf_int(kf, "backend", ENGINE_BACKEND_EXTERNAL) == ENGINE_BACKEND_UINPUT
+                          ? BE_UINPUT : BE_AUTO;
+        }
+        if (cfg_backend < BE_AUTO || cfg_backend > BE_UINPUT) cfg_backend = BE_AUTO;
         int key   = kf_int(kf, "hotkey", KEY_F6);
         if (cfg_btn < 0 || cfg_btn > 2) cfg_btn = 0;
         if (cfg_act < 0 || cfg_act > 1) cfg_act = 0;
@@ -88,13 +110,18 @@ static void save_config(void)
 
     int key;
     engine_get_hotkey(&key);
+    int backend = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_backend));
+    if (backend < BE_AUTO || backend > BE_UINPUT) backend = BE_AUTO;
 
     GKeyFile *kf = g_key_file_new();
     g_key_file_set_integer(kf, "main", "rate_mode", cur_mode);
     g_key_file_set_double (kf, "main", "rate_value", gtk_spin_button_get_value(GTK_SPIN_BUTTON(spin)));
     g_key_file_set_integer(kf, "main", "button", gtk_combo_box_get_active(GTK_COMBO_BOX(cb_btn)));
     g_key_file_set_integer(kf, "main", "hold_mode", gtk_combo_box_get_active(GTK_COMBO_BOX(cb_act)));
-    g_key_file_set_integer(kf, "main", "backend", gtk_combo_box_get_active(GTK_COMBO_BOX(cb_backend)));
+    g_key_file_set_integer(kf, "main", "backend_mode", backend);
+    /* Keep the old key so that 1.0.x can still read the file. */
+    g_key_file_set_integer(kf, "main", "backend",
+                           backend == BE_UINPUT ? ENGINE_BACKEND_UINPUT : ENGINE_BACKEND_EXTERNAL);
     g_key_file_set_integer(kf, "main", "hotkey", key);
 
     gsize len;
@@ -109,6 +136,53 @@ static void save_config(void)
 /* ------------------------------------------------------------------ */
 
 static void refresh_ui(void);
+static void on_portal_state(void *user);
+
+/* Whether the desktop is a wlroots compositor that may not implement the
+ * RemoteDesktop portal (niri, sway, ...).  Used only by the Auto mode when
+ * the wlr-virtual-pointer protocol is unavailable. */
+static gboolean is_wlroots_desktop(void)
+{
+    const char *desk = g_getenv("XDG_CURRENT_DESKTOP");
+    if (!desk)
+        return FALSE;
+    static const char *const names[] = {
+        "niri", "sway", "Hyprland", "river", "wayfire", "labwc", "wlroots"
+    };
+    for (size_t i = 0; i < G_N_ELEMENTS(names); i++)
+        if (g_strstr_len(desk, -1, names[i]))
+            return TRUE;
+    return FALSE;
+}
+
+/* Translate the combo box selection into an engine backend.  Auto picks the
+ * best backend that is actually available in this session. */
+static int resolved_backend(void)
+{
+    int mode = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_backend));
+    if (mode < BE_AUTO || mode > BE_UINPUT)
+        mode = BE_AUTO;
+
+    if (mode == BE_PORTAL)  return ENGINE_BACKEND_EXTERNAL;
+    if (mode == BE_WAYLAND) return ENGINE_BACKEND_WAYLAND;
+    if (mode == BE_UINPUT)  return ENGINE_BACKEND_UINPUT;
+
+    if (wayland_ok)
+        return ENGINE_BACKEND_WAYLAND;
+    if (is_wlroots_desktop())
+        return uinput_ok ? ENGINE_BACKEND_UINPUT : ENGINE_BACKEND_WAYLAND;
+    if (!g_getenv("WAYLAND_DISPLAY") && !g_getenv("WAYLAND_SOCKET"))
+        return uinput_ok ? ENGINE_BACKEND_UINPUT : ENGINE_BACKEND_EXTERNAL;
+    return ENGINE_BACKEND_EXTERNAL;       /* KDE / GNOME: use the portal */
+}
+
+static void ensure_portal(void)
+{
+    if (!portal_started) {
+        portal_started = TRUE;
+        portal_init(on_portal_state, NULL);   /* async; may show a dialog */
+    }
+}
 
 static double current_cps(void)
 {
@@ -131,8 +205,11 @@ static void apply_settings(void)
     if (bi < 0 || bi > 2) bi = 0;
     engine_set_button(BUTTONS[bi]);
     engine_set_hold_mode(gtk_combo_box_get_active(GTK_COMBO_BOX(cb_act)) == 1);
-    int be = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_backend));
-    engine_set_backend(be == ENGINE_BACKEND_UINPUT ? ENGINE_BACKEND_UINPUT : ENGINE_BACKEND_EXTERNAL);
+
+    int be = resolved_backend();
+    if (be == ENGINE_BACKEND_EXTERNAL)
+        ensure_portal();
+    engine_set_backend(be);
 
     char buf[128];
     snprintf(buf, sizeof buf, "= %.1f CPS  |  %.3f ms between clicks", cps, 1000.0 / cps);
@@ -163,7 +240,7 @@ static void configure_spin(int mode, double value)
 static void refresh_ui(void)
 {
     gboolean run = engine_is_running();
-    int be = gtk_combo_box_get_active(GTK_COMBO_BOX(cb_backend));
+    int be = resolved_backend();
     gtk_button_set_label(GTK_BUTTON(btn_run), run ? "Stop" : "Start");
     gtk_widget_set_sensitive(btn_run, engine_backend_ready());
 
@@ -181,6 +258,8 @@ static void refresh_ui(void)
         snprintf(buf, sizeof buf, "Status: clicking");
     } else if (be == ENGINE_BACKEND_EXTERNAL) {
         snprintf(buf, sizeof buf, "%s", portal_status());
+    } else if (be == ENGINE_BACKEND_WAYLAND) {
+        snprintf(buf, sizeof buf, "%s", wayland_status());
     } else if (!uinput_ok) {
         snprintf(buf, sizeof buf, "Cannot create virtual mouse: %s", engine_error());
     } else {
@@ -190,8 +269,12 @@ static void refresh_ui(void)
 
     if (be == ENGINE_BACKEND_UINPUT && current_cps() > 30.0)
         gtk_label_set_text(GTK_LABEL(lbl_hint),
-            "uinput: libinput (used by KWin) merges clicks closer than ~25 ms, so the "
-            "button looks held down. Use the Portal method above 30 CPS.");
+            "uinput: libinput (used by niri, KWin, ...) merges clicks closer than ~25 ms, so the "
+            "button looks held down. Use a Wayland or Portal method above 30 CPS.");
+    else if (be == ENGINE_BACKEND_WAYLAND && !wayland_ok)
+        gtk_label_set_text(GTK_LABEL(lbl_hint),
+            "This compositor does not support wlr-virtual-pointer. Choose Auto, Portal "
+            "(KDE/GNOME) or uinput.");
     else if (engine_hotkey_device_count() == 0)
         gtk_label_set_text(GTK_LABEL(lbl_hint),
             "No readable keyboard found: global hotkey disabled.\n"
@@ -291,7 +374,9 @@ static void on_destroy(GtkWidget *w, gpointer d)
     (void)w; (void)d;
     save_config();
     engine_shutdown();
-    portal_close();
+    wayland_close();
+    if (portal_started)
+        portal_close();
     gtk_main_quit();
 }
 
@@ -342,7 +427,9 @@ static void build_ui(void)
     gtk_combo_box_set_active(GTK_COMBO_BOX(cb_act), cfg_act);
 
     cb_backend = gtk_combo_box_text_new();
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cb_backend), "Portal (KWin/GNOME, any CPS)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cb_backend), "Auto (recommended)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cb_backend), "Portal (KDE / GNOME, any CPS)");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cb_backend), "Wayland virtual pointer (niri / sway)");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(cb_backend), "uinput (up to ~30 CPS)");
     gtk_combo_box_set_active(GTK_COMBO_BOX(cb_backend), cfg_backend);
 
@@ -383,20 +470,34 @@ static void build_ui(void)
 
 int main(int argc, char **argv)
 {
-    /* Must match jetautoclicker.desktop so KDE (Wayland app_id / X11 class)
-     * associates the window with its menu entry and icon. */
+    /* Must match jetautoclicker.desktop so the compositor (Wayland app_id /
+     * X11 class) associates the window with its menu entry and icon. */
     g_set_prgname("jetautoclicker");
     g_set_application_name(APP_NAME);
+
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-V") == 0) {
+            printf("%s %s\n", APP_NAME, APP_VERSION);
+            return 0;
+        }
+    }
+
     gtk_init(&argc, &argv);
     gtk_window_set_default_icon_name("jetautoclicker");
 
     uinput_ok = engine_init(on_engine_change, on_engine_capture, NULL);
     engine_set_external(portal_inject);
+    engine_set_wayland(wayland_inject);
+
+    /* The wlr virtual pointer is available on niri/sway and needs no
+     * permissions.  The portal is started lazily only when it is selected. */
+    wayland_ok = wayland_init();
+    engine_set_wayland_ready(wayland_ok);
+
     load_config();                 /* may set the hotkey in the engine */
     build_ui();
-    apply_settings();
+    apply_settings();              /* starts the portal if the chosen mode needs it */
     refresh_ui();
-    portal_init(on_portal_state, NULL);   /* async; may show a permission dialog */
 
     g_timeout_add(500, on_tick, NULL);
     gtk_widget_show_all(win);
